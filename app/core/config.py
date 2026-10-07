@@ -7,6 +7,10 @@ class Settings(BaseSettings):
 
     secret_key: str
     access_token_expire_minutes: int = 60
+    
+    openai_api_key: str
+    openai_base_url: str
+    openai_model: str
 
     model_config = SettingsConfigDict(
         env_file=".env",

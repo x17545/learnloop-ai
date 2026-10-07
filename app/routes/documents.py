@@ -16,6 +16,8 @@ from app.models.document_chunk import DocumentChunk
 from app.services.chunk_service import chunk_text
 from app.schemas.search import SearchRequest, SearchResponse
 from app.services.vector_service import search_chunks
+from app.schemas.qa import AskRequest, AskResponse
+from app.services.ai_service import generate_rag_answer
 
 
 router = APIRouter(
@@ -236,4 +238,68 @@ def search_document(
         "document_id": document_id,
         "query": search_data.query,
         "results": results,
+    }
+
+
+@router.post(
+    "/{document_id}/ask",
+    response_model=AskResponse,
+)
+def ask_document(
+    document_id: int,
+    ask_data: AskRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    document = db.scalar(
+        select(Document).where(
+            Document.id == document_id,
+            Document.user_id == current_user.id,
+        )
+    )
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    search_result = search_chunks(
+        query=ask_data.question,
+        document_id=document_id,
+        limit=4,
+    )
+
+    documents = search_result.get("documents", [[]])[0]
+    metadatas = search_result.get("metadatas", [[]])[0]
+
+    contexts = []
+
+    for index, text in enumerate(documents):
+        metadata = metadatas[index]
+
+        contexts.append(
+            {
+                "text": text,
+                "page_number": metadata["page_number"],
+                "chunk_index": metadata["chunk_index"],
+            }
+        )
+
+    if not contexts:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No relevant content found.",
+        )
+
+    answer = generate_rag_answer(
+        question=ask_data.question,
+        contexts=contexts,
+    )
+
+    return {
+        "document_id": document_id,
+        "question": ask_data.question,
+        "answer": answer,
+        "sources": contexts,
     }
