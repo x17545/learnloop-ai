@@ -14,6 +14,8 @@ from app.models.document_page import DocumentPage
 from app.services.pdf_service import extract_pdf_text
 from app.models.document_chunk import DocumentChunk
 from app.services.chunk_service import chunk_text
+from app.schemas.search import SearchRequest, SearchResponse
+from app.services.vector_service import search_chunks
 
 
 router = APIRouter(
@@ -179,3 +181,59 @@ def get_document(
         )
 
     return document
+
+
+@router.post(
+    "/{document_id}/search",
+    response_model=SearchResponse,
+)
+def search_document(
+    document_id: int,
+    search_data: SearchRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    document = db.scalar(
+        select(Document).where(
+            Document.id == document_id,
+            Document.user_id == current_user.id,
+        )
+    )
+
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found.",
+        )
+
+    result = search_chunks(
+        query=search_data.query,
+        document_id=document_id,
+        limit=search_data.limit,
+    )
+
+    documents = result.get("documents", [[]])[0]
+    metadatas = result.get("metadatas", [[]])[0]
+    distances = result.get("distances", [[]])[0]
+
+    results = []
+
+    for index, text in enumerate(documents):
+        metadata = metadatas[index]
+
+        results.append(
+            {
+                "text": text,
+                "page_number": metadata["page_number"],
+                "chunk_index": metadata["chunk_index"],
+                "distance": distances[index]
+                if index < len(distances)
+                else None,
+            }
+        )
+
+    return {
+        "document_id": document_id,
+        "query": search_data.query,
+        "results": results,
+    }
