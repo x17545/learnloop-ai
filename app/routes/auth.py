@@ -1,12 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from app.core.dependencies import get_current_user
 
-from app.core.security import hash_password, verify_password
+
+from app.core.security import (
+    create_access_token,
+    decode_access_token,
+    hash_password,
+    verify_password,
+)
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.user import (
-    LoginResponse,
+    TokenResponse,
     UserCreate,
     UserLogin,
     UserResponse,
@@ -51,7 +58,7 @@ def register(
 
 @router.post(
     "/login",
-    response_model=LoginResponse,
+    response_model=TokenResponse,
 )
 def login(
     login_data: UserLogin,
@@ -76,7 +83,20 @@ def login(
             detail="Invalid email or password.",
         )
 
+    access_token = create_access_token(
+    subject=str(user.id)
+    )
+
     return {
-        "message": "Login successful.",
-        "user": user,
+        "access_token": access_token,
+        "token_type": "bearer",
     }
+
+@router.get(
+    "/me",
+    response_model=UserResponse,
+)
+def get_me(
+    current_user: User = Depends(get_current_user),
+):
+    return current_user
